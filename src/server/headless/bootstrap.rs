@@ -2,11 +2,20 @@ use super::*;
 
 /// Run the headless server. This is the entry point called from main.rs.
 pub fn run_server() -> io::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    let handoff_import = args.get(2).map(String::as_str) == Some("--handoff-import");
+    let process_context = crate::platform::prepare_server_process(handoff_import);
     init_logging();
+    match process_context {
+        Ok(true) => info!("server using persistent user service context"),
+        Ok(false) => {}
+        Err(err) => {
+            warn!(%err, "could not select persistent user service context; retaining inherited context")
+        }
+    }
     crate::platform::raise_server_nofile_limit();
 
-    let args: Vec<String> = std::env::args().collect();
-    if args.get(2).map(String::as_str) == Some("--handoff-import") {
+    if handoff_import {
         let socket_path = args
             .get(3)
             .map(PathBuf::from)
@@ -18,6 +27,10 @@ pub fn run_server() -> io::Result<()> {
     }
 
     let loaded_config = config::Config::load();
+    #[cfg(windows)]
+    if loaded_config.config.server.allow_unelevated_clients {
+        crate::platform::allow_unelevated_clients();
+    }
     let (api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
     let event_hub = api::EventHub::default();
     let should_quit = Arc::new(AtomicBool::new(false));

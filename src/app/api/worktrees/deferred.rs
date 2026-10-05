@@ -16,8 +16,14 @@ impl App {
         &mut self,
         request: Request,
         respond_to: std::sync::mpsc::Sender<String>,
+        client_local: bool,
     ) -> bool {
         match request.method {
+            crate::api::schema::Method::WorktreeList(_)
+            | crate::api::schema::Method::WorktreeOpen(_) => {
+                self.start_api_worktree_read(request, respond_to, client_local);
+                true
+            }
             crate::api::schema::Method::WorktreeCreate(params) => {
                 self.start_api_worktree_create(request.id, params, respond_to);
                 true
@@ -229,6 +235,10 @@ impl App {
             );
             return;
         };
+        if let Err(err) = self.require_restored_worktree_ready(ws_idx) {
+            Self::send_api_response(respond_to, encode_error(id, err.code, err.message));
+            return;
+        }
         let Some(space) = self
             .state
             .workspaces
